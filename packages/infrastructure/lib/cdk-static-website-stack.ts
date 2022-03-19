@@ -16,12 +16,14 @@ import {
 import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import { CertificateValidation } from 'aws-cdk-lib/aws-certificatemanager';
 
-const DOMAIN_NAME = 'YOURDOMAIN.com';
-const WWW_DOMAIN_NAME = `www.${DOMAIN_NAME}`;
-
 export class CdkStaticWebsiteStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
+
+    // This should be the basename of your website, e.g. mydomain.com (not www.mydomain.com)
+    const { DOMAIN_NAME } = process.env;
+    if (!DOMAIN_NAME) throw new Error('Set an environment variable for DOMAIN_NAME');
+    const WWW_DOMAIN_NAME = `www.${DOMAIN_NAME}`;
 
     const siteBucket = new s3.Bucket(this, 'WebsiteBucket', {
       encryption: BucketEncryption.S3_MANAGED,
@@ -54,6 +56,7 @@ export class CdkStaticWebsiteStack extends Stack {
     });
 
     const ROOT_INDEX_FILE = 'index.html';
+    const PROD_FOLDER = 'production';
     const cfDist = new cloudfront.CloudFrontWebDistribution(this, 'CfDistribution', {
       comment: 'CDK Cloudfront Secure S3',
       viewerCertificate: ViewerCertificate.fromAcmCertificate(cert, {
@@ -68,7 +71,7 @@ export class CdkStaticWebsiteStack extends Stack {
           s3OriginSource: {
             originAccessIdentity: accessIdentity,
             s3BucketSource: siteBucket,
-            originPath: '/production',
+            originPath: `/${PROD_FOLDER}`,
           },
           behaviors: [
             {
@@ -96,6 +99,18 @@ export class CdkStaticWebsiteStack extends Stack {
     });
 
     // You will need output to create a www CNAME record to
-    new CfnOutput(this, 'CfDomainName', { value: cfDist.distributionDomainName });
+    new CfnOutput(this, 'CfDomainName', {
+      value: cfDist.distributionDomainName,
+      description: 'Create a CNAME record with name `www` and value of this CF distribution URL',
+    });
+    new CfnOutput(this, 'S3BucketName', {
+      value: `s3://${siteBucket.bucketName}/${PROD_FOLDER}`,
+      description: 'Use this with `aws s3 sync` to upload your static website files',
+    });
+    new CfnOutput(this, 'CfDistId', {
+      value: cfDist.distributionId,
+      description:
+        'Use this ID to perform a cache invalidation to see changes to your site immediately',
+    });
   }
 }
